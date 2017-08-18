@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/shadowfaxenator/testdrone/agregate"
+	"github.com/shadowfaxenator/golangevc/agregate"
 )
 
 type WalletAgregate struct {

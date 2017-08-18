@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/shadowfaxenator/testdrone/agregate"
+	"github.com/shadowfaxenator/golangevc/agregate"
 )
 
 func main() {

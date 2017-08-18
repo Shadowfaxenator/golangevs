@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/shadowfaxenator/testdrone/agregate"
+	"github.com/shadowfaxenator/golangevc/agregate"
 )
 
 type WalletCreated struct {
