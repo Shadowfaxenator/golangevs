@@ -1,13 +1,15 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/shadowfaxenator/golangevc/agregate"
 )
 
 type WalletCreated struct {
-	*agregate.BasicEvent
-	BaseDeposit int
-	Name        string
+	agregate.BasicEvent `bson:",inline"`
+	BaseDeposit         int
+	Name                string
 }
 
 func (b *WalletCreated) String() string {
@@ -16,8 +18,8 @@ func (b *WalletCreated) String() string {
 }
 
 type FundsAdded struct {
-	*agregate.BasicEvent
-	Amount int
+	agregate.BasicEvent `bson:",inline"`
+	Amount              int
 }
 
 func (b *FundsAdded) String() string {
@@ -26,28 +28,44 @@ func (b *FundsAdded) String() string {
 }
 
 func (e *WalletCreated) Apply(state agregate.Agregate) {
-	state.(*WalletAgregate).Id = e.AgregateId
-	state.(*WalletAgregate).Name = e.Name
-	state.(*WalletAgregate).Balance = e.BaseDeposit
+	if state, ok := state.(*WalletAgregate); ok {
+
+		state.Lock()
+		defer state.Unlock()
+		state.Name = e.Name
+		state.Balance = e.BaseDeposit
+		state.Status = "ACTIVE"
+	}
+
 }
 
 func (e *FundsAdded) Apply(state agregate.Agregate) {
-	state.(*WalletAgregate).Balance += e.Amount
+	if state, ok := state.(*WalletAgregate); ok {
+		state.Lock()
+		defer state.Unlock()
+		state.Balance += e.Amount
+	}
+
 }
 
-func NewFundsAddedEvent(id agregate.AgregateId, amount int) (event *FundsAdded) {
-	event = &FundsAdded{}
-	event.BasicEvent = &agregate.BasicEvent{}
-	event.AgregateId = id
-	event.Amount = amount
-	return
+func NewFundsAddedEvent(amount int) *FundsAdded {
+	event := &FundsAdded{
+		Amount: amount,
+	}
+	t := agregate.EventType(fmt.Sprintf("%T\n", event))
+	event.BasicEvent = agregate.NewBasicEvent(t)
+
+	return event
 }
 
-func NewWalletCreatedEvent(id agregate.AgregateId, name string, balance int) (event *WalletCreated) {
-	event = &WalletCreated{}
-	event.BasicEvent = &agregate.BasicEvent{}
-	event.AgregateId = id
-	event.Name = name
-	event.BaseDeposit = balance
-	return
+func NewWalletCreatedEvent(name string, balance int) *WalletCreated {
+
+	event := &WalletCreated{
+
+		Name:        name,
+		BaseDeposit: balance,
+	}
+	t := agregate.EventType(fmt.Sprintf("%T\n", event))
+	event.BasicEvent = agregate.NewBasicEvent(t)
+	return event
 }

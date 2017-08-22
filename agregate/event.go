@@ -1,14 +1,33 @@
 package agregate
 
+import (
+	"strings"
+)
+
+var _EventRegistry EventRegistry = make(EventRegistry)
+
+func RegisterEventType(es EventType, t Event) {
+	_EventRegistry[es] = t
+}
+func ConstructEventFromReg(et EventType) Event {
+	e := _EventRegistry[et]
+
+	return e
+}
+
+type EventRegistry map[EventType]Event
+
 type Event interface {
-	GetAgregateId() AgregateId
 	Apply(Agregate)
 }
 
 type BasicEvent struct {
-	AgregateId AgregateId
+	Type EventType
 }
 
-func (e BasicEvent) GetAgregateId() AgregateId {
-	return e.AgregateId
+func NewBasicEvent(t EventType) (e BasicEvent) {
+	ss := strings.Split(string(t), ".")
+
+	e = BasicEvent{Type: EventType(ss[len(ss)-1])}
+	return
 }

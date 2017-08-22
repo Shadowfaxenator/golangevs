@@ -1,39 +1,93 @@
 package agregate
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/gob"
+	"log"
 	"sync"
+
+	"gopkg.in/mgo.v2"
+
+	"gopkg.in/mgo.v2/bson"
 )
 
-type AgregateId int
+type AgregateId bson.ObjectId
+type EventType string
+type AgregateType string
 
 type Agregate interface {
-	getId() AgregateId
 	incrementVersion()
 	appendPendingEvent(e Event)
+	Self() *BasicAgregate
 }
 
 type BasicAgregate struct {
-	Id              AgregateId
-	ExpectedVersion int
-	Changes         []Event
-	Mu              *sync.RWMutex
+	ID            bson.ObjectId
+	Version       int
+	PendingEvents []Event
+	// Mutex to lock
+	*sync.RWMutex `bson:"-"`
+	Type          AgregateType
 }
 
-func (a *BasicAgregate) incrementVersion() {
-	a.Mu.Lock()
-	defer a.Mu.Unlock()
-	a.ExpectedVersion++
+func (a BasicAgregate) GetBSON() (interface{}, error) {
+	var buf bytes.Buffer
+
+	enc := gob.NewEncoder(&buf)
+
+	if err := enc.Encode(a.PendingEvents); err != nil {
+		return nil, err
+	}
+	return struct {
+		ID      bson.ObjectId `bson:"agregateID"`
+		Version int
+		Type    string
+		Events  string
+	}{a.ID, a.Version, string(a.Type), base64.StdEncoding.EncodeToString(buf.Bytes())}, nil
 }
-func (a *BasicAgregate) getId() AgregateId {
-	a.Mu.RLock()
-	defer a.Mu.RUnlock()
-	return a.Id
+
+func (a *BasicAgregate) SetBSON(raw bson.Raw) error {
+	temp := &struct {
+		ID      bson.ObjectId `bson:"agregateID"`
+		Version int
+		Type    string
+		Events  string
+	}{}
+	if err := raw.Unmarshal(temp); err != nil {
+		return err
+	}
+	b, err := base64.StdEncoding.DecodeString(temp.Events)
+	if err != nil {
+		return err
+	}
+	dec := gob.NewDecoder(bytes.NewReader(b))
+	var events []Event
+	if err := dec.Decode(&events); err != nil {
+		return err
+	}
+
+	a.ID = temp.ID
+	a.PendingEvents = events
+	a.Type = AgregateType(temp.Type)
+	a.Version = temp.Version
+	a.RWMutex = new(sync.RWMutex)
+	return nil
+}
+
+func (a *BasicAgregate) Self() *BasicAgregate {
+	return a
+}
+func (a *BasicAgregate) incrementVersion() {
+	a.Lock()
+	defer a.Unlock()
+	a.Version++
 }
 
 func (a *BasicAgregate) appendPendingEvent(e Event) {
-	a.Mu.Lock()
-	defer a.Mu.Unlock()
-	a.Changes = append(a.Changes, e)
+	a.Lock()
+	defer a.Unlock()
+	a.PendingEvents = append(a.PendingEvents, e)
 }
 
 // func (state *BasicAgregate) trackChange(e Event) {
@@ -41,27 +95,76 @@ func (a *BasicAgregate) appendPendingEvent(e Event) {
 // 	state.transition(e)
 // }
 
-func Construct(ag Agregate, events []Event) {
+func Construct(ag Agregate) error {
+	ses, err := NewRepo()
+	defer ses.Close()
+	if err != nil {
+		return err
+	}
+	c := ses.DB("").C(string(ag.Self().Type))
+	iter := c.Find(bson.M{"agregateID": ag.Self().ID}).Iter()
+	defer func() {
+		if err := iter.Close(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+	var item BasicAgregate
 
-	for _, e := range events {
+	for iter.Next(&item) {
+		for _, e := range item.PendingEvents {
 
-		if e.GetAgregateId() == ag.getId() {
 			e.Apply(ag)
 			ag.incrementVersion()
-
 		}
-
 	}
+	return nil
+
 }
 
 func AddChange(ag Agregate, e Event) {
-	if e.GetAgregateId() == ag.getId() {
-		e.Apply(ag)
-		ag.appendPendingEvent(e)
-	}
+
+	e.Apply(ag)
+	ag.appendPendingEvent(e)
+
 }
 
-// func NewBasicAgregate() *BasicAgregate {
-// 	b := &BasicAgregate{Mu: new(sync.RWMutex)}
-// 	return
-// }
+func NewBasicAgregate(id AgregateId, t AgregateType) *BasicAgregate {
+
+	b := &BasicAgregate{}
+
+	b.ID = bson.ObjectId(id)
+
+	b.Type = t
+	b.RWMutex = new(sync.RWMutex)
+	return b
+}
+
+func Commit(ag Agregate) error {
+
+	ses, err := NewRepo()
+	defer ses.Close()
+	if err != nil {
+		return err
+	}
+	c := ses.DB("").C(string(ag.Self().Type))
+	ind := mgo.Index{
+
+		Key:    []string{"version", "agregateID"},
+		Unique: true,
+	}
+
+	err = c.EnsureIndex(ind)
+	if err != nil {
+		return err
+	}
+	if err := c.Insert(ag.Self()); err != nil {
+
+		return err
+	}
+	return nil
+
+}
+
+func NewAgregateID() AgregateId {
+	return AgregateId(bson.NewObjectId())
+}

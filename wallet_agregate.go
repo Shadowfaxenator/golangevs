@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"sync"
+
+	"log"
 
 	"github.com/shadowfaxenator/golangevc/agregate"
 )
@@ -11,28 +13,45 @@ type WalletAgregate struct {
 	*agregate.BasicAgregate
 	Balance int
 	Name    string
+	Status  string
 }
 
 func (w *WalletAgregate) String() string {
 	format := `
 	"Name: %s"
 	"Balance: %d"
-	"Version: %d"
-	"ID: %v"
-	"PendingEvents: %v"
+	"PendingEvents: %v",
+	"Status: %v"
 	`
-	return fmt.Sprintf(format, w.Name, w.Balance, w.ExpectedVersion, w.Id, w.Changes)
+	return fmt.Sprintf(format, w.Name, w.Balance, w.PendingEvents, w.Status)
 }
 
-func (state *WalletAgregate) AddFunds(amount int) {
+func (state *WalletAgregate) AddFunds(amount int) error {
+	if state.Status != "ACTIVE" {
 
-	agregate.AddChange(state, NewFundsAddedEvent(state.Id, amount))
+		return errors.New("Can't Add Founds, status is not active")
+	}
+	agregate.AddChange(state, NewFundsAddedEvent(amount))
+	return nil
 }
 
-func NewWalletAgregate(id agregate.AgregateId, e []agregate.Event) *WalletAgregate {
+func (state *WalletAgregate) CreateNewWallet(baseDeposit int, name string) error {
+	e := NewWalletCreatedEvent(name, baseDeposit)
+	if state.Status != "" {
+		return errors.New("Wallet is already created")
+	}
+	agregate.AddChange(state, e)
+	return nil
+}
 
-	ag := &WalletAgregate{BasicAgregate: &agregate.BasicAgregate{Id: id, Mu: new(sync.RWMutex)}}
+func NewWalletAgregate(id agregate.AgregateId) *WalletAgregate {
 
-	agregate.Construct(ag, e)
+	ag := &WalletAgregate{}
+	ag.BasicAgregate = agregate.NewBasicAgregate(id, agregate.AgregateType("Wallet"))
+
+	err := agregate.Construct(ag)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	return ag
 }
